@@ -90,32 +90,40 @@ def atr(bars, period=14):
     return sum(ranges[-period:]) / period
 
 
+# XAU/USD convention used by this bot: 1 pip = 0.10 in quoted gold price.
+GOLD_PIP_SIZE = 0.10
+STOP_LOSS_PIPS = 25       # within the requested 20–30 pip range
+TP1_PIPS = 50             # minimum requested take profit
+TP2_PIPS = 75
+
+
 def make_trade_message(label, direction, bars, lookback=6, extra_note=""):
     trigger = bars[-1]
-    recent = bars[-lookback:]
     entry = trigger["close"]
+    sl_distance = STOP_LOSS_PIPS * GOLD_PIP_SIZE
+    tp1_distance = TP1_PIPS * GOLD_PIP_SIZE
+    tp2_distance = TP2_PIPS * GOLD_PIP_SIZE
+
     if direction == "BUY":
-        sl = min(b["low"] for b in recent)
-        risk = entry - sl
-        if risk <= 0:
-            return None
-        tp1, tp2 = entry + 1.5 * risk, entry + 2.0 * risk
+        sl = entry - sl_distance
+        tp1, tp2 = entry + tp1_distance, entry + tp2_distance
     else:
-        sl = max(b["high"] for b in recent)
-        risk = sl - entry
-        if risk <= 0:
-            return None
-        tp1, tp2 = entry - 1.5 * risk, entry - 2.0 * risk
+        sl = entry + sl_distance
+        tp1, tp2 = entry - tp1_distance, entry - tp2_distance
+
     checked = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    note = f"\n{extra_note}" if extra_note else ""
+    note = f"\\n{extra_note}" if extra_note else ""
     return (
-        f"📊 XAU/USD — {label}: {direction}\n"
-        f"Entry reference: {entry:.2f}\nStop Loss: {sl:.2f}\n"
-        f"TP1 (1.5R): {tp1:.2f}\nTP2 (2R): {tp2:.2f}\n"
-        f"Completed candle (UTC): {trigger['datetime'] or 'unavailable'}\n"
-        f"Detected: {checked}{note}\n\n"
-        "Signal only; no trade is placed. Check your MT5 broker price, spread, "
-        "slippage and risk. This strategy is not backtested; no profit or accuracy is guaranteed."
+        f"📊 XAU/USD — {label}: {direction}\\n"
+        f"Entry reference: {entry:.2f}\\n"
+        f"Stop Loss: {sl:.2f} ({STOP_LOSS_PIPS} pips)\\n"
+        f"TP1: {tp1:.2f} ({TP1_PIPS} pips)\\n"
+        f"TP2: {tp2:.2f} ({TP2_PIPS} pips)\\n"
+        f"Completed candle (UTC): {trigger['datetime'] or 'unavailable'}\\n"
+        f"Detected: {checked}{note}\\n\\n"
+        "Pip convention: 1 XAU/USD pip = 0.10 price units in this bot; confirm your broker's convention. "
+        "Signal only; no trade is placed. Check your MT5 broker price, spread, slippage and risk. "
+        "This strategy is not backtested; no profit or accuracy is guaranteed."
     )
 
 
