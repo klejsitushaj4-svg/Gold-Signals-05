@@ -5,6 +5,8 @@ Does not place trades. No economic calendar is connected, so volatility signals
 are NOT confirmation that a scheduled news event occurred. Not backtested.
 """
 import os
+import json
+import base64
 import requests
 from datetime import datetime, timezone
 
@@ -12,6 +14,10 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "").strip()
 TEST_TELEGRAM_DELIVERY = os.getenv("TEST_TELEGRAM_DELIVERY", "false").lower() == "true"
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY", "").strip()
+GITHUB_REF_NAME = os.getenv("GITHUB_REF_NAME", "main").strip() or "main"
+STATE_PATH = "signals_state.json"
 SESSION = requests.Session()
 BASE_URL = "https://api.twelvedata.com/time_series"
 
@@ -182,6 +188,67 @@ def generate_signals():
     return signals
 
 
+
+def github_headers():
+    if not GITHUB_TOKEN or not GITHUB_REPOSITORY:
+        raise RuntimeError("Persistent duplicate protection unavailable: GitHub token/repository environment missing.")
+    return {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def load_signal_state():
+    """Load previously sent signal IDs from the repository so scheduled runs deduplicate."""
+    url = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/contents/{STATE_PATH}"
+    response = SESSION.get(
+        url, headers=github_headers(), params={"ref": GITHUB_REF_NAME}, timeout=20
+    )
+    if response.status_code == 404:
+        return set(), None
+    response.raise_for_status()
+    payload = response.json()
+    raw = base64.b64decode(payload.get("content", "")).decode("utf-8")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = {"sent": []}
+    return set(data.get("sent", [])), payload.get("sha")
+
+
+def save_signal_state(signal_ids, existing_sha):
+    """Persist the most recent signal IDs in GitHub; Actions runners are temporary."""
+    url = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/contents/{STATE_PATH}"
+    data = {"sent": list(signal_ids)[-200:]}
+    payload = {
+        "message": "Update sent-signal deduplication state",
+        "content": base64.b64encode(
+            (json.dumps(data, indent=2) + "\\n").encode("utf-8")
+        ).decode("ascii"),
+        "branch": GITHUB_REF_NAME,
+    }
+    if existing_sha:
+        payload["sha"] = existing_sha
+    response = SESSION.put(url, headers=github_headers(), json=payload, timeout=20)
+    response.raise_for_status()
+
+
+def signal_id(message):
+    """Stable ID from strategy/direction and the completed candle timestamp."""
+    lines = message.splitlines()
+    title = lines[0].strip() if lines else "unknown"
+    candle_line = next(
+        (line for line in lines if line.startswith("Completed candle (UTC):")),
+        "",
+    )
+    candle_time = candle_line.partition(":")[2].strip()
+    if not candle_time or candle_time == "unavailable":
+        raise RuntimeError("Signal has no completed-candle timestamp; refusing to send an undeduplicated signal.")
+    return f"{title}|{candle_time}"
+
+
+
 def main():
     print("Starting XAU/USD scalping, swing and volatility-reaction checks.")
     if TEST_TELEGRAM_DELIVERY:
@@ -190,10 +257,23 @@ def main():
     if not signals:
         print("No signal setup on this check; no trade signal sent.")
         return
+
+    sent_ids, state_sha = load_signal_state()
+    new_ids = set(sent_ids)
+    delivered = 0
     for signal in signals:
+        sid = signal_id(signal)
+        if sid in new_ids:
+            print(f"Duplicate signal skipped: {sid}")
+            continue
         print(signal)
         telegram_send(signal)
-    print(f"Sent {len(signals)} signal(s) to Telegram.")
+        new_ids.add(sid)
+        delivered += 1
+
+    if new_ids != sent_ids:
+        save_signal_state(new_ids, state_sha)
+    print(f"Sent {delivered} new signal(s); skipped {len(signals) - delivered} duplicate(s).")
 
 
 if __name__ == "__main__":
