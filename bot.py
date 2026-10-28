@@ -146,19 +146,19 @@ def make_trade_message(label, direction, bars, lookback=6, extra_note=""):
     )
 
 
-def make_limit_message(label, direction, entry, candle_time, reference_name, reference_price):
+def make_limit_message(label, direction, entry, candle_time, reference_name, level_price, current_price):
     """Create a pending limit-order idea only when entry is on the correct side of price."""
     sl_distance = STOP_LOSS_PIPS * GOLD_PIP_SIZE
     tp1_distance = TP1_PIPS * GOLD_PIP_SIZE
     tp2_distance = TP2_PIPS * GOLD_PIP_SIZE
     if direction == "BUY":
-        if entry >= reference_price:
+        if entry >= current_price:
             return None
         sl = entry - sl_distance
         tp1, tp2 = entry + tp1_distance, entry + tp2_distance
         order_type = "BUY LIMIT"
     else:
-        if entry <= reference_price:
+        if entry <= current_price:
             return None
         sl = entry + sl_distance
         tp1, tp2 = entry - tp1_distance, entry - tp2_distance
@@ -168,8 +168,8 @@ def make_limit_message(label, direction, entry, candle_time, reference_name, ref
     return (
         f"📌 XAU/USD — {label}: {order_type}\n"
         f"Limit entry: {entry:.2f}\n"
-        f"Current reference price: {reference_price:.2f}\n"
-        f"{reference_name}: {reference_price:.2f}\n"
+        f"Current reference price: {current_price:.2f}\n"
+        f"{reference_name}: {level_price:.2f}\n"
         f"Stop Loss: {sl:.2f} ({STOP_LOSS_PIPS} pips)\n"
         f"TP1: {tp1:.2f} ({TP1_PIPS} pips)\n"
         f"TP2: {tp2:.2f} ({TP2_PIPS} pips)\n"
@@ -202,14 +202,14 @@ def support_resistance_limit_signal(m5, h1e20, h1e50, m15e20, m15e50):
         if min_gap <= gap <= max_gap:
             return make_limit_message(
                 "M5 SUPPORT / PULLBACK", "BUY", buy_entry,
-                current.get("datetime"), "Recent support", support
+                current.get("datetime"), "Recent support", support, price
             )
     if bearish:
         gap = sell_entry - price
         if min_gap <= gap <= max_gap:
             return make_limit_message(
                 "M5 RESISTANCE / PULLBACK", "SELL", sell_entry,
-                current.get("datetime"), "Recent resistance", resistance
+                current.get("datetime"), "Recent resistance", resistance, price
             )
     return None
 
