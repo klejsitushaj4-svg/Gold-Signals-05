@@ -130,13 +130,28 @@ def breakout_direction(bars, lookback=3):
 
 
 def generate_signals():
-    # Four requests per check: M5 scalping/news reaction, M15 confirmation,
-    # H1 trend, H4 swing trend. Check API quota for your Twelve Data plan.
+    # Five requests per check: M1 fast entry, M5/news reaction, M15 confirmation,
+    # H1 trend, H4 swing trend. Check API quota before enabling frequent checks.
+    m1 = get_bars("1min")
     m5 = get_bars("5min")
     m15 = get_bars("15min")
     h1 = get_bars("1h")
     h4 = get_bars("4h")
     signals = []
+
+    # 1) FAST ENTRY: use the last completed M1 candle for quicker entry alerts.
+    # This is near-real-time, not tick-by-tick; the provider and scheduled runner add latency.
+    m1atr = atr(m1)
+    if all(x is not None for x in (h1e20, h1e50, m15e20, m15e50, m1atr)) and m1atr > 0:
+        d1 = breakout_direction(m1, 3)
+        body1 = abs(m1[-1]["close"] - m1[-1]["open"])
+        if body1 >= 0.25 * m1atr:
+            if d1 == "BUY" and h1e20 > h1e50 and m15e20 > m15e50:
+                msg = make_trade_message("FAST ENTRY SCALPING (M1)", d1, m1, 8)
+                if msg: signals.append(msg)
+            elif d1 == "SELL" and h1e20 < h1e50 and m15e20 < m15e50:
+                msg = make_trade_message("FAST ENTRY SCALPING (M1)", d1, m1, 8)
+                if msg: signals.append(msg)
 
     # 1) SCALPING: H1 trend + M15 alignment + completed M5 breakout.
     h1e20 = ema([b["close"] for b in h1], 20)
