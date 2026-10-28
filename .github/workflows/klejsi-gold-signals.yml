@@ -1,6 +1,11 @@
 name: Klejsi Gold Signals
 
 on:
+  push:
+    paths:
+      - 'bot.py'
+      - 'requirements.txt'
+      - '.github/workflows/klejsi-gold-signals.yml'
   workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *"
