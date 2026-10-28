@@ -139,6 +139,11 @@ def generate_signals():
     h4 = get_bars("4h")
     signals = []
 
+    h1e20 = ema([b["close"] for b in h1], 20)
+    h1e50 = ema([b["close"] for b in h1], 50)
+    m15e20 = ema([b["close"] for b in m15], 20)
+    m15e50 = ema([b["close"] for b in m15], 50)
+
     # 1) FAST ENTRY: use the last completed M1 candle for quicker entry alerts.
     # This is near-real-time, not tick-by-tick; the provider and scheduled runner add latency.
     m1atr = atr(m1)
@@ -154,10 +159,6 @@ def generate_signals():
                 if msg: signals.append(msg)
 
     # 1) SCALPING: H1 trend + M15 alignment + completed M5 breakout.
-    h1e20 = ema([b["close"] for b in h1], 20)
-    h1e50 = ema([b["close"] for b in h1], 50)
-    m15e20 = ema([b["close"] for b in m15], 20)
-    m15e50 = ema([b["close"] for b in m15], 50)
     m5atr = atr(m5)
     if all(x is not None for x in (h1e20, h1e50, m15e20, m15e50, m5atr)) and m5atr > 0:
         d = breakout_direction(m5, 3)
