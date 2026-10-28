@@ -6,14 +6,14 @@ workflow_dispatch:
 jobs:
 run-bot:
 runs-on: ubuntu-latest
-
 steps:
-  - name: Get bot code
-    uses: actions/checkout@v4
+- name: Get bot code
+uses: actions/checkout@v4
+
   - name: Set up Python
     uses: actions/setup-python@v5
     with:
-      python-version: '3.11'
+      python-version: "3.11"
   - name: Install requirements
     run: pip install -r requirements.txt
   - name: Start Telegram bot
