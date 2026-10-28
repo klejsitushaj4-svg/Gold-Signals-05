@@ -131,19 +131,87 @@ def make_trade_message(label, direction, bars, lookback=6, extra_note=""):
         tp1, tp2 = entry - tp1_distance, entry - tp2_distance
 
     checked = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    note = f"\\n{extra_note}" if extra_note else ""
+    note = f"\n{extra_note}" if extra_note else ""
     return (
-        f"📊 XAU/USD — {label}: {direction}\\n"
-        f"Entry reference: {entry:.2f}\\n"
-        f"Stop Loss: {sl:.2f} ({STOP_LOSS_PIPS} pips)\\n"
-        f"TP1: {tp1:.2f} ({TP1_PIPS} pips)\\n"
-        f"TP2: {tp2:.2f} ({TP2_PIPS} pips)\\n"
-        f"Completed candle (UTC): {trigger['datetime'] or 'unavailable'}\\n"
-        f"Detected: {checked}{note}\\n\\n"
+        f"📊 XAU/USD — {label}: {direction}\n"
+        f"Entry reference: {entry:.2f}\n"
+        f"Stop Loss: {sl:.2f} ({STOP_LOSS_PIPS} pips)\n"
+        f"TP1: {tp1:.2f} ({TP1_PIPS} pips)\n"
+        f"TP2: {tp2:.2f} ({TP2_PIPS} pips)\n"
+        f"Completed candle (UTC): {trigger['datetime'] or 'unavailable'}\n"
+        f"Detected: {checked}{note}\n\n"
         "Pip convention: 1 XAU/USD pip = 0.10 price units in this bot; confirm your broker's convention. "
         "Signal only; no trade is placed. Check your MT5 broker price, spread, slippage and risk. "
         "This strategy is not backtested; no profit or accuracy is guaranteed."
     )
+
+
+def make_limit_message(label, direction, entry, candle_time, reference_name, reference_price):
+    """Create a pending limit-order idea only when entry is on the correct side of price."""
+    sl_distance = STOP_LOSS_PIPS * GOLD_PIP_SIZE
+    tp1_distance = TP1_PIPS * GOLD_PIP_SIZE
+    tp2_distance = TP2_PIPS * GOLD_PIP_SIZE
+    if direction == "BUY":
+        if entry >= reference_price:
+            return None
+        sl = entry - sl_distance
+        tp1, tp2 = entry + tp1_distance, entry + tp2_distance
+        order_type = "BUY LIMIT"
+    else:
+        if entry <= reference_price:
+            return None
+        sl = entry + sl_distance
+        tp1, tp2 = entry - tp1_distance, entry - tp2_distance
+        order_type = "SELL LIMIT"
+
+    checked = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return (
+        f"📌 XAU/USD — {label}: {order_type}\n"
+        f"Limit entry: {entry:.2f}\n"
+        f"Current reference price: {reference_price:.2f}\n"
+        f"{reference_name}: {reference_price:.2f}\n"
+        f"Stop Loss: {sl:.2f} ({STOP_LOSS_PIPS} pips)\n"
+        f"TP1: {tp1:.2f} ({TP1_PIPS} pips)\n"
+        f"TP2: {tp2:.2f} ({TP2_PIPS} pips)\n"
+        f"Completed candle (UTC): {candle_time or 'unavailable'}\n"
+        f"Detected: {checked}\n\n"
+        "PENDING IDEA — not an executed order. Place only if price is still near this setup; cancel if stale. "
+        "Pip convention: 1 pip = 0.10 XAU/USD price units in this bot; confirm your broker's convention. "
+        "Signal only; no trade is placed. Check spread and risk. Not backtested; no accuracy is guaranteed."
+    )
+
+
+def support_resistance_limit_signal(m5, h1e20, h1e50, m15e20, m15e50):
+    """Find a conservative M5 support/resistance limit idea aligned with H1/M15 trend."""
+    if len(m5) < 16 or any(x is None for x in (h1e20, h1e50, m15e20, m15e50)):
+        return None
+    completed = m5[:-1]
+    recent = completed[-12:]
+    current = m5[-1]
+    price = current["close"]
+    support = min(b["low"] for b in recent)
+    resistance = max(b["high"] for b in recent)
+    buy_entry = support + 0.10
+    sell_entry = resistance - 0.10
+    min_gap, max_gap = 0.20, 2.50
+    bullish = h1e20 > h1e50 and m15e20 > m15e50
+    bearish = h1e20 < h1e50 and m15e20 < m15e50
+
+    if bullish:
+        gap = price - buy_entry
+        if min_gap <= gap <= max_gap:
+            return make_limit_message(
+                "M5 SUPPORT / PULLBACK", "BUY", buy_entry,
+                current.get("datetime"), "Recent support", support
+            )
+    if bearish:
+        gap = sell_entry - price
+        if min_gap <= gap <= max_gap:
+            return make_limit_message(
+                "M5 RESISTANCE / PULLBACK", "SELL", sell_entry,
+                current.get("datetime"), "Recent resistance", resistance
+            )
+    return None
 
 
 def breakout_direction(bars, lookback=3):
@@ -228,8 +296,12 @@ def generate_signals():
             )
             if msg: signals.append(msg)
 
-    return signals
+    # Pending limit idea: only alert when a valid support/resistance pullback exists.
+    limit_msg = support_resistance_limit_signal(m5, h1e20, h1e50, m15e20, m15e50)
+    if limit_msg:
+        signals.append(limit_msg)
 
+    return signals
 
 
 def github_headers():
