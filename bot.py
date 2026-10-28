@@ -7,6 +7,7 @@ are NOT confirmation that a scheduled news event occurred. Not backtested.
 import os
 import json
 import base64
+import time
 import requests
 from datetime import datetime, timezone
 
@@ -23,17 +24,35 @@ BASE_URL = "https://api.twelvedata.com/time_series"
 
 
 def telegram_send(message):
+    """Send a Telegram message with retries for transient network/API failures."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         raise RuntimeError("Missing Telegram secrets: check repository Actions secrets.")
-    response = SESSION.post(
-        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-        json={"chat_id": TELEGRAM_CHAT_ID, "text": message},
-        timeout=20,
-    )
-    response.raise_for_status()
-    if not response.json().get("ok"):
-        raise RuntimeError("Telegram API rejected the message; check bot access and chat ID.")
 
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    last_error = None
+    for attempt in range(1, 4):
+        try:
+            response = SESSION.post(
+                url,
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": message},
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not payload.get("ok"):
+                raise RuntimeError(
+                    f"Telegram API rejected the message: {payload.get('description', 'unknown error')}"
+                )
+            message_id = payload.get("result", {}).get("message_id", "unknown")
+            print(f"Telegram delivery confirmed (message_id={message_id}, attempt={attempt}).")
+            return
+        except (requests.RequestException, ValueError, RuntimeError) as exc:
+            last_error = exc
+            print(f"Telegram delivery attempt {attempt}/3 failed: {type(exc).__name__}: {exc}")
+            if attempt < 3:
+                time.sleep(2 ** attempt)
+
+    raise RuntimeError(f"Telegram delivery failed after 3 attempts: {last_error}")
 
 def get_bars(interval, outputsize=120):
     if not TWELVE_DATA_API_KEY:
